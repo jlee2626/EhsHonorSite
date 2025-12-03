@@ -1,34 +1,49 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [authed, setAuthed] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    let unsub = supabase.auth.onAuthStateChange((_e, session) => {
-      setAuthed(!!session);
-      setReady(true);
-      if (!session) router.replace("/");
-    });
+    async function checkUser() {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user) {
+        router.replace("/login");
+      } else {
+        setChecking(false);
+      }
+    }
 
-    // get current session immediately (faster than waiting for event)
-    supabase.auth.getSession().then(({ data }) => {
-      setAuthed(!!data.session);
-      setReady(true);
-      if (!data.session) router.replace("/");
-    });
+    checkUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!session) {
+          router.replace("/login");
+        }
+      }
+    );
+
+    const unsub = authListener?.subscription;
 
     return () => {
-      unsub.data.subscription.unsubscribe();
+      unsub?.unsubscribe();
     };
   }, [router]);
 
-  if (!ready) return <main className="p-8">Loading…</main>;
-  if (!authed) return null; // we're redirecting
+  if (checking) {
+    return (
+      <main className="min-h-[60vh] flex items-center justify-center">
+        <div className="rounded-2xl border bg-white px-6 py-4 shadow-sm text-sm text-gray-700">
+          Checking your session…
+        </div>
+      </main>
+    );
+  }
 
   return <>{children}</>;
 }
