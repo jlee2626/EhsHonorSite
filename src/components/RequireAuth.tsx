@@ -1,34 +1,65 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function RequireAuth({ children }: { children: React.ReactNode }) {
+export default function RequireAuth({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [authed, setAuthed] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const unsub = supabase.auth.onAuthStateChange((_e, session) => {
-      setAuthed(!!session);
-      setReady(true);
-      if (!session) router.replace("/");
-    });
+    let cancelled = false;
 
-    // get current session immediately (faster than waiting for event)
-    supabase.auth.getSession().then(({ data }) => {
-      setAuthed(!!data.session);
-      setReady(true);
-      if (!data.session) router.replace("/");
-    });
+    async function check() {
+      const { data, error } = await supabase.auth.getSession();
+
+      // If session is missing/invalid, force a clean logout + redirect
+      if (error || !data.session) {
+        await supabase.auth.signOut();
+
+        if (!cancelled) {
+          setChecking(false);
+          router.replace("/login"); // ✅ send to login (not "/")
+        }
+        return;
+      }
+
+      if (!cancelled) setChecking(false);
+    }
+
+    check();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!session) {
+          await supabase.auth.signOut();
+          router.replace("/login");
+        }
+      }
+    );
+
+    const unsub = listener.subscription;
 
     return () => {
-      unsub.data.subscription.unsubscribe();
+      cancelled = true;
+      unsub.unsubscribe();
     };
   }, [router]);
 
-  if (!ready) return <main className="p-8">Loading…</main>;
-  if (!authed) return null; // we're redirecting
+  if (checking) {
+    return (
+      <main className="min-h-[60vh] flex items-center justify-center">
+        <div className="rounded-2xl border bg-white px-6 py-4 shadow-sm text-sm text-gray-700">
+          Loading…
+        </div>
+      </main>
+    );
+  }
 
   return <>{children}</>;
 }
